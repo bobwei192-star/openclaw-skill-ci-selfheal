@@ -1,0 +1,12 @@
+name = "ci-selfheal"
+version = "1.0.0"
+description = "Jenkins build failure auto-heal loop — AI diagnoses, fixes, and creates MRs automatically"
+
+[dependencies]
+skills = [
+    "jenkins",
+    "ci-cd-watchdog",
+    "cicd-pipeline",
+    "gitlab-skill",
+    "n8n"
+]

@@ -1,0 +1,27 @@
+jenkins:
+  url: "https://172.19.0.5:8440/jenkins"
+  user: "zx"
+  token_env: "JENKINS_API_TOKEN"
+
+gitlab:
+  url: "https://172.19.0.5:8441"
+  token_env: "GITLAB_TOKEN"
+  host_env: "GITLAB_HOST"
+
+repair:
+  max_retries: 5
+  poll_interval_sec: 5
+  build_timeout_min: 30
+
+whitelist:
+  repos:
+    - "root/model_test"
+    - "group/backend-api"
+  branch_pattern: "^(feat|fix|dev|feature)(/.*)?$"
+  protected_branches:
+    - "main"
+    - "master"
+    - "release/*"
+
+notify:
+  dingtalk_webhook_env: "DINGTALK_WEBHOOK"

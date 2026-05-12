@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+from orchestrator import Orchestrator
+from webhook_listener import start_server
+
+
+def main():
+    parser = argparse.ArgumentParser(description="CI Self-Heal Skill for OpenClaw")
+    sub = parser.add_subparsers(dest="command")
+
+    run_parser = sub.add_parser("orchestrate", help="Run full self-heal orchestration")
+    run_parser.add_argument("--job", required=True, help="Jenkins job name")
+    run_parser.add_argument("--build", type=int, required=True, help="Build number")
+    run_parser.add_argument("--branch", default=os.environ.get("CI_BRANCH", ""), help="Git branch")
+    run_parser.add_argument("--repo", default=os.environ.get("CI_REPO", ""), help="Git repository path")
+
+    status_parser = sub.add_parser("status", help="Show self-heal status")
+    status_parser.add_argument("--job", help="Jenkins job name")
+
+    serve_parser = sub.add_parser("serve", help="Start webhook listener")
+    serve_parser.add_argument("--host", default="0.0.0.0")
+    serve_parser.add_argument("--port", type=int, default=int(os.environ.get("BRIDGE_PORT", "8080")))
+
+    args = parser.parse_args()
+
+    if args.command == "orchestrate":
+        orchestrator = Orchestrator()
+        payload = {"job": args.job, "build": args.build, "branch": args.branch, "repo": args.repo}
+        orchestrator.handle(payload)
+        status = orchestrator.get_status(args.job)
+        print(json.dumps(status, indent=2, ensure_ascii=False))
+        if status.get("status") in ("SUCCESS",):
+            sys.exit(0)
+        sys.exit(1)
+
+    elif args.command == "status":
+        orchestrator = Orchestrator()
+        if args.job:
+            chain = orchestrator.get_status(args.job)
+            print(json.dumps(chain, indent=2, ensure_ascii=False))
+        else:
+            state = orchestrator.get_status()
+            print(json.dumps(state, indent=2, ensure_ascii=False))
+
+    elif args.command == "serve":
+        start_server(args.host, args.port)
+
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

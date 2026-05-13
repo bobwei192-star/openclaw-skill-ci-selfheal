@@ -1,48 +1,56 @@
 import json
 import os
-import re
-import tempfile
+import sys
 from pathlib import Path
 
 import pytest
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.orchestrator import Orchestrator
+
+
+_CONFIG_TEMPLATE = """
+jenkins:
+  url_env: "JENKINS_URL"
+  user_env: "JENKINS_USER"
+  token_env: "JENKINS_API_TOKEN"
+gitlab:
+  url: "http://test:8441"
+  token_env: "TEST_TOKEN"
+repair:
+  max_retries: {max_retries}
+  poll_interval_sec: 1
+  build_timeout_min: 1
+whitelist:
+  repos: {repos}
+  branch_pattern: "{branch_pattern}"
+  protected_branches: {protected}
+notify:
+  dingtalk_webhook_env: ""
+"""
+
+
+def _make_config(tmp_path, max_retries=3, repos=None, branch_pattern=".*", protected=None):
+    config = tmp_path / "config.yaml"
+    config.write_text(_CONFIG_TEMPLATE.format(
+        max_retries=max_retries,
+        repos=json.dumps(repos or []),
+        branch_pattern=branch_pattern,
+        protected=json.dumps(protected or []),
+    ))
+    return Orchestrator(config_path=str(config))
 
 
 class TestWhitelistCheck:
     @pytest.fixture
     def orchestrator(self, tmp_path):
-        config = tmp_path / "config.yaml"
-        config.write_text("""
-jenkins:
-  url: "http://test:8080"
-  user: "test"
-  token_env: "TEST_TOKEN"
-gitlab:
-  url: "http://test:8441"
-  token_env: "TEST_TOKEN"
-repair:
-  max_retries: 3
-  poll_interval_sec: 1
-  build_timeout_min: 1
-whitelist:
-  repos:
-    - "root/model_test"
-    - "group/backend-api"
-  branch_pattern: "^(feat|fix|dev|feature)(/.*)?$"
-  protected_branches:
-    - "main"
-    - "master"
-    - "release/*"
-notify:
-  dingtalk_webhook_env: ""
-""")
-        return Orchestrator(config_path=str(config))
+        return _make_config(
+            tmp_path, max_retries=3,
+            repos=["root/model_test", "group/backend-api"],
+            branch_pattern="^(feat|fix|dev|feature)(/.*)?$",
+            protected=["main", "master", "release/*"],
+        )
 
     def test_whitelisted_repo_and_branch(self, orchestrator):
         assert orchestrator._whitelist_check("root/model_test", "dev/test") is True
@@ -69,27 +77,7 @@ notify:
 class TestDesensitize:
     @pytest.fixture
     def orchestrator(self, tmp_path):
-        config = tmp_path / "config.yaml"
-        config.write_text("""
-jenkins:
-  url: "http://test:8080"
-  user: "test"
-  token_env: "TEST_TOKEN"
-gitlab:
-  url: "http://test:8441"
-  token_env: "TEST_TOKEN"
-repair:
-  max_retries: 3
-  poll_interval_sec: 1
-  build_timeout_min: 1
-whitelist:
-  repos: []
-  branch_pattern: ".*"
-  protected_branches: []
-notify:
-  dingtalk_webhook_env: ""
-""")
-        return Orchestrator(config_path=str(config))
+        return _make_config(tmp_path, max_retries=3)
 
     def test_token_is_redacted(self, orchestrator):
         text = "password=supersecret123"
@@ -120,27 +108,7 @@ notify:
 class TestBackoff:
     @pytest.fixture
     def orchestrator(self, tmp_path):
-        config = tmp_path / "config.yaml"
-        config.write_text("""
-jenkins:
-  url: "http://test:8080"
-  user: "test"
-  token_env: "TEST_TOKEN"
-gitlab:
-  url: "http://test:8441"
-  token_env: "TEST_TOKEN"
-repair:
-  max_retries: 5
-  poll_interval_sec: 1
-  build_timeout_min: 1
-whitelist:
-  repos: []
-  branch_pattern: ".*"
-  protected_branches: []
-notify:
-  dingtalk_webhook_env: ""
-""")
-        return Orchestrator(config_path=str(config))
+        return _make_config(tmp_path, max_retries=5)
 
     def test_attempt_1(self, orchestrator):
         assert orchestrator._backoff(1) == 1
@@ -161,27 +129,7 @@ class TestStatePersistence:
         import scripts.orchestrator as orch
         state_file = tmp_path / ".self-heal-state.json"
         orch.STATE_FILE = state_file
-        config = tmp_path / "config.yaml"
-        config.write_text("""
-jenkins:
-  url: "http://test:8080"
-  user: "test"
-  token_env: "TEST_TOKEN"
-gitlab:
-  url: "http://test:8441"
-  token_env: "TEST_TOKEN"
-repair:
-  max_retries: 3
-  poll_interval_sec: 1
-  build_timeout_min: 1
-whitelist:
-  repos: []
-  branch_pattern: ".*"
-  protected_branches: []
-notify:
-  dingtalk_webhook_env: ""
-""")
-        return Orchestrator(config_path=str(config))
+        return _make_config(tmp_path, max_retries=3)
 
     def test_initial_state_empty(self, orchestrator):
         status = orchestrator.get_status()

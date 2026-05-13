@@ -1,11 +1,14 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+JQ_VERSION="1.8.1"
+JQ_BIN_DIR="/tmp/selfheal-bin"
+JQ_BIN_PATH="${JQ_BIN_DIR}/jq"
 
 cat > /tmp/get_deps.py << 'PYEOF'
-import sys, json, urllib.request, platform, os, zipfile
+import sys, json, urllib.request, os, zipfile
 
 PYVER = f"cp{sys.version_info.major}{sys.version_info.minor}"
-ARCH = platform.machine()
 TARGET = "/tmp/selfheal-deps"
 os.makedirs(TARGET, exist_ok=True)
 
@@ -54,8 +57,35 @@ for pkg in DEPENDENCIES:
     install(pkg)
 
 print("")
-print("All dependencies installed.")
-print(f"Run with: PYTHONPATH={TARGET}:$(pwd) python3 -m scripts.webhook_listener --host 0.0.0.0 --port 8080")
+print("Python dependencies installed.")
 PYEOF
 
 python3 /tmp/get_deps.py
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64)
+    JQ_ASSET="jq-linux-amd64"
+    ;;
+  aarch64|arm64)
+    JQ_ASSET="jq-linux-arm64"
+    ;;
+  *)
+    echo "Unsupported arch: $ARCH, skipping jq install"
+    JQ_ASSET=""
+    ;;
+esac
+
+if [ -n "$JQ_ASSET" ]; then
+  mkdir -p "$JQ_BIN_DIR"
+  curl -L \
+    -o "$JQ_BIN_PATH" \
+    "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/${JQ_ASSET}"
+  chmod +x "$JQ_BIN_PATH"
+  "$JQ_BIN_PATH" --version
+fi
+
+echo ""
+echo "All dependencies installed."
+echo "Run with:"
+echo "  PATH=${JQ_BIN_DIR}:\$PATH PYTHONPATH=/tmp/selfheal-deps:\$(pwd) python3 -m scripts.webhook_listener --host 0.0.0.0 --port 8080"

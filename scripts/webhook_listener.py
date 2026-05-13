@@ -19,32 +19,40 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
+        logger.info("[WEBHOOK] 收到 POST 请求: path=%s Content-Length=%s client=%s",
+                     self.path, content_length, self.client_address)
         try:
             payload = json.loads(body)
+            logger.info("[WEBHOOK] 请求体 JSON: %s", json.dumps(payload, ensure_ascii=False))
         except json.JSONDecodeError:
+            logger.warning("[WEBHOOK] JSON 解析失败: %s", body[:200])
             self._respond(400, {"status": "error", "reason": "Invalid JSON"})
             return
 
         required = ["job", "build"]
         missing = [k for k in required if k not in payload]
         if missing:
+            logger.warning("[WEBHOOK] 缺少必要字段: %s", missing)
             self._respond(400, {"status": "error", "reason": f"Missing fields: {missing}"})
             return
 
         status = payload.get("status", "").upper()
         if status and status not in ("FAILURE", "FAILED"):
+            logger.info("[WEBHOOK] 非失败状态 (%s)，跳过自愈", status)
             self._respond(200, {"status": "skipped", "reason": f"not a failure: {status}"})
             return
 
-        logger.info("Webhook received: job=%s build=%s branch=%s repo=%s",
+        logger.info("[WEBHOOK] ★ 触发自愈流程: job=%s build=%s branch=%s repo=%s status=%s",
                      payload.get("job"), payload.get("build"),
-                     payload.get("branch", "?"), payload.get("repo", "?"))
+                     payload.get("branch", "?"), payload.get("repo", "?"),
+                     status)
 
         try:
             orchestrator.handle(payload)
+            logger.info("[WEBHOOK] 自愈流程 handle() 完成")
             self._respond(200, {"status": "accepted"})
         except Exception as e:
-            logger.exception("Handle failed")
+            logger.exception("[WEBHOOK] 自愈流程异常")
             self._respond(500, {"status": "error", "reason": str(e)})
 
     def do_GET(self):

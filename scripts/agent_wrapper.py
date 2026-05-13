@@ -42,60 +42,82 @@ def _get_agent_env():
     }
 
 
-def ask_agent(instruction: str, expect_json: bool = True, timeout: int = 180):
+def ask_agent(instruction: str, expect_json: bool = True, timeout: int = 180, skill_name: str = ""):
     cmd = [_get_openclaw_bin(), "agent", "--agent", "main", "--message", instruction]
     if expect_json:
         cmd.append("--json")
 
-    logger.info("Agent instruction: %s...", instruction[:200])
+    skill_tag = f"skill={skill_name}" if skill_name else "skill=N/A"
+    logger.info("[AGENT] ★ %s | 调用 OpenClaw 二进制: %s", skill_tag, _get_openclaw_bin())
+    logger.info("[AGENT] ★ %s | 完整命令: %s --agent main --message '...' %s",
+                 skill_tag, _get_openclaw_bin(), "--json" if expect_json else "")
+    logger.info("[AGENT] ★ %s | 超时: %ss, expect_json=%s", skill_tag, timeout, expect_json)
+    logger.info("[AGENT] ★ %s | 指令长度: %s 字符", skill_tag, len(instruction))
+    logger.info("[AGENT] ★ %s | 环境: HOME=%s PATH=%s",
+                 skill_tag,
+                 os.environ.get("HOME", "N/A"),
+                 os.environ.get("PATH", "N/A"))
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_get_agent_env())
         stdout = result.stdout.strip()
+        logger.info("[AGENT] ★ %s | 进程退出码: %s", skill_tag, result.returncode)
+        logger.info("[AGENT] ★ %s | stdout: %s 字符, stderr: %s 字符",
+                     skill_tag, len(result.stdout or ""), len(result.stderr or ""))
         if not stdout:
+            logger.error("[AGENT] ★ %s | 返回空 (exit=%s) stderr[:500]: %s",
+                          skill_tag, result.returncode, result.stderr[:500])
             raise RuntimeError(
                 f"Agent empty response (exit={result.returncode}) stderr: {result.stderr[:500]}"
             )
 
         if not expect_json:
+            logger.info("[AGENT] ★ %s | 纯文本模式，长度=%s", skill_tag, len(stdout))
             return stdout
 
-        # ── 兜底调试 ──
         debug_path = "/tmp/agent_debug_raw.json"
         with open(debug_path, "w") as f:
             f.write(stdout)
+        logger.info("[AGENT] ★ %s | 原始输出已保存: %s", skill_tag, debug_path)
 
-        # ── 解析 Agent 响应信封 ──
         try:
             envelope = json.loads(stdout)
+            logger.info("[AGENT] ★ %s | JSON 信封 keys=%s", skill_tag,
+                         list(envelope.keys()) if isinstance(envelope, dict) else "not-dict")
         except json.JSONDecodeError:
-            logger.warning("Agent envelope is not valid JSON, raw saved to %s", debug_path)
+            logger.warning("[AGENT] ★ %s | JSON 信封解析失败，已保存", skill_tag)
             return {}
 
-        # 提取 AI 实际回复文本
         ai_text = ""
         if isinstance(envelope, dict):
             for container in (envelope, envelope.get("result", {}), envelope.get("data", {})):
                 payloads = container.get("payloads")
                 if isinstance(payloads, list) and len(payloads) > 0:
                     ai_text = payloads[0].get("text", "")
+                    logger.info("[AGENT] ★ %s | 从 payloads[0].text 提取回复，长度=%s", skill_tag, len(ai_text))
                     break
             if not ai_text and isinstance(envelope.get("text"), str):
                 ai_text = envelope["text"]
+                logger.info("[AGENT] ★ %s | 从 envelope.text 提取回复，长度=%s", skill_tag, len(ai_text))
         elif isinstance(envelope, str):
             ai_text = envelope
+            logger.info("[AGENT] ★ %s | 回复为纯字符串，长度=%s", skill_tag, len(ai_text))
         else:
             ai_text = stdout
+            logger.info("[AGENT] ★ %s | 使用原始 stdout 作为回复", skill_tag)
 
-        # ── 从 AI 文本中提取 JSON ──
         json_str = _extract_json_block(ai_text)
         if json_str:
-            return json.loads(json_str)
+            logger.info("[AGENT] ★ %s | 提取到 JSON，长度=%s", skill_tag, len(json_str))
+            parsed = json.loads(json_str)
+            logger.info("[AGENT] ★ %s | JSON 解析成功，keys=%s", skill_tag,
+                         list(parsed.keys()) if isinstance(parsed, dict) else "not-dict")
+            return parsed
 
-        logger.warning("No JSON block found in agent response. Text[:500]: %s", ai_text[:500])
+        logger.warning("[AGENT] ★ %s | 未找到 JSON 块。回复[:500]: %s", skill_tag, ai_text[:500])
         return {}
 
     except subprocess.TimeoutExpired:
-        logger.error("Agent call timed out after %ds", timeout)
+        logger.error("[AGENT] ★ %s | 调用超时 (timeout=%ss)", skill_tag, timeout)
         raise
 
 
